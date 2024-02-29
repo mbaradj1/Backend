@@ -8,5 +8,10 @@ namespace Backend.Data
         public AppDbContext(DbContextOptions options) : base(options) { }
 
         public DbSet<Product> Products { get; set; }
+
+        internal Task<object> SaveChangesAsync()
+        {
+            throw new NotImplementedException();
+        }
     }
 }

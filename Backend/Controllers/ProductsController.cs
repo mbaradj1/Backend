@@ -60,7 +60,7 @@ namespace Backend.Controllers
 
                 // Ajouter la logique pour ajouter le produit à la base de données
                 _appDbContext.Products.Add(product);
-                await _appDbContext.SaveChangesAsync();
+                object value = await _appDbContext.SaveChangesAsync();
 
                 // Retournez une réponse réussie
                 return Ok(product);
