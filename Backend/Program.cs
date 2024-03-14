@@ -1,12 +1,23 @@
-using Backend.Data;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using System;
 using System.Net.Http;
+using System.Linq;
+using System.Threading.Tasks;
+using Backend.Data;
+using Microsoft.Xrm.Tooling.Connector;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Ajoute la configuration à votre application
+builder.Configuration.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
 
 // Assuming you have AppDbConnectionString defined in your configuration
 var connectionString = builder.Configuration.GetConnectionString("AppDbConnectionString");
@@ -34,82 +45,113 @@ app.UseHttpsRedirection();
 
 app.Run();
 
-app.Run();
-
 public class CrmServiceConfiguration
 {
     private readonly HttpClient _httpClient;
+    private readonly IConfiguration _configuration;
+    private readonly string _crmUrl;
+    private readonly string _username;
+    private readonly string _password;
 
-    public CrmServiceConfiguration(HttpClient httpClient)
+    public CrmServiceConfiguration(HttpClient httpClient, IConfiguration configuration)
     {
         _httpClient = httpClient;
+        _configuration = configuration;
+        _crmUrl = _configuration["CrmSettings:Url"];
+        _username = _configuration["CrmSettings:Username"];
+        _password = _configuration["CrmSettings:Password"];
+
+        var connectionString = $"AuthType=Office365;Url={_crmUrl};Username={_username};Password={_password}";
+        var crmServiceClient = new CrmServiceClient(connectionString);
+
+        if (crmServiceClient.IsReady)
+        {
+            _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{_username}:{_password}")));
+        }
+        else
+        {
+            throw new Exception("La connexion à Dynamics 365 a échoué.");
+        }
     }
 
     public IOrganizationService GetOrganizationService()
     {
-        // Configuration de la connexion Dynamics 365
-        // Remplacez les valeurs par vos propres informations
-        string crmUrl = "https://orgc82bf837.crm4.dynamics.com/api/data/v9.0/";
-        string username = "Mamadou.BARADJI@TalanCloudExperts.onmicrosoft.com"; // Remplacez par votre adresse e-mail Dynamics 365
-        string password = "Verrati.93100"; // Remplacez par le mot de passe de votre compte Dynamics 365
+        var connectionString = $"AuthType=Office365;Url={_crmUrl};Username={_username};Password={_password}";
+        var crmServiceClient = new CrmServiceClient(connectionString);
 
-        var authenticationHeader = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{username}:{password}"));
-
-        _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authenticationHeader);
-
-        // Use _httpClient for making HTTP requests to Dynamics 365
-        // Example: var response = await _httpClient.GetAsync($"{crmUrl}/someEndpoint");
-
-        // Modify the code as needed based on your specific Dynamics 365 API requests
-
-        // Return a mock IOrganizationService for demonstration purposes
-        return new MockOrganizationService();
+        if (crmServiceClient.IsReady)
+        {
+            return (IOrganizationService)crmServiceClient.OrganizationServiceProxy;
+        }
+        else
+        {
+            throw new Exception("La connexion à Dynamics 365 a échoué.");
+        }
     }
 
-    private class MockOrganizationService : IOrganizationService
+    public async Task CreateContactAsync(IOrganizationService service)
     {
-        // Implement the IOrganizationService interface methods as needed
-        // Example: public Entity Retrieve(string entityName, Guid id, ColumnSet columnSet) { }
-        public void Associate(string entityName, Guid entityId, Relationship relationship, EntityReferenceCollection relatedEntities)
-        {
-            throw new NotImplementedException();
-        }
+        Entity contact = new Entity("contact");
+        contact["firstname"] = "Bob";
+        contact["lastname"] = "Smith";
+        Guid contactId = service.Create(contact);
+        Console.WriteLine("New contact id: {0}.", contactId.ToString());
+    }
 
-        public Guid Create(Entity entity)
-        {
-            throw new NotImplementedException();
-        }
+    public async Task RetrieveContactAsync(IOrganizationService service)
+    {
+        QueryExpression query = new QueryExpression("contact");
+        query.ColumnSet = new ColumnSet(true);
+        query.Criteria.AddCondition("firstname", ConditionOperator.Equal, "Bob");
 
-        public void Delete(string entityName, Guid id)
+        EntityCollection contacts = service.RetrieveMultiple(query);
+        if (contacts.Entities.Count > 0)
         {
-            throw new NotImplementedException();
+            var contact = contacts.Entities.First();
+            Console.WriteLine("Retrieved contact: {0} {1}", contact["firstname"], contact["lastname"]);
         }
-
-        public void Disassociate(string entityName, Guid entityId, Relationship relationship, EntityReferenceCollection relatedEntities)
+        else
         {
-            throw new NotImplementedException();
+            Console.WriteLine("Contact not found.");
         }
+    }
 
-        public OrganizationResponse Execute(OrganizationRequest request)
+    public async Task UpdateContactAsync(IOrganizationService service)
+    {
+        QueryExpression query = new QueryExpression("contact");
+        query.ColumnSet = new ColumnSet(true);
+        query.Criteria.AddCondition("firstname", ConditionOperator.Equal, "Bob");
+
+        EntityCollection contacts = service.RetrieveMultiple(query);
+        if (contacts.Entities.Count > 0)
         {
-            throw new NotImplementedException();
+            var contact = contacts.Entities.First();
+            contact["jobtitle"] = "CEO";
+            service.Update(contact);
+            Console.WriteLine("Updated contact: {0} {1}", contact["firstname"], contact["lastname"]);
         }
-
-        public Entity Retrieve(string entityName, Guid id, ColumnSet columnSet)
+        else
         {
-            throw new NotImplementedException();
+            Console.WriteLine("Contact not found.");
         }
+    }
 
-        public EntityCollection RetrieveMultiple(QueryBase query)
+    public async Task DeleteContactAsync(IOrganizationService service)
+    {
+        QueryExpression query = new QueryExpression("contact");
+        query.ColumnSet = new ColumnSet(true);
+        query.Criteria.AddCondition("firstname", ConditionOperator.Equal, "Bob");
+
+        EntityCollection contacts = service.RetrieveMultiple(query);
+        if (contacts.Entities.Count > 0)
         {
-            throw new NotImplementedException();
+            var contact = contacts.Entities.First();
+            service.Delete("contact", contact.Id);
+            Console.WriteLine("Deleted contact: {0} {1}", contact["firstname"], contact["lastname"]);
         }
-
-        public void Update(Entity entity)
+        else
         {
-            throw new NotImplementedException();
+            Console.WriteLine("Contact not found.");
         }
-
-        // ... other IOrganizationService methods
     }
 }
